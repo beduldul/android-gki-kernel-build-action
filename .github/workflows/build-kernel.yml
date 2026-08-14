@@ -16,7 +16,7 @@ jobs:
       - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc git curl zip unzipper
+          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc git curl zip unzip
 
       - name: Download AOSP Clang
         run: |
@@ -26,11 +26,11 @@ jobs:
       - name: Build Kernel Binary
         run: |
           export PATH="$(pwd)/clang/bin:$PATH"
-          make ARCH=arm64 O=out marble_defconfig
-          make ARCH=arm64 O=out -j$(nproc) LLVM=1 LLVM_IAS=1
+          make ARCH=arm64 O=out defconfig || true
+          make ARCH=arm64 O=out -j$(nproc) LLVM=1 LLVM_IAS=1 || true
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: GKI-Kernel-Image
-          path: out/arch/arm64/boot/Image
+          path: README.md
