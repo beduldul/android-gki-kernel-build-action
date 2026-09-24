@@ -1,10 +1,10 @@
 # Android GKI Kernel Build Action Template
 
-A production-ready GitHub Actions workflow template for building Android Generic Kernel Image (GKI) kernels (Linux 5.10 / 5.15 / 6.1) with AOSP Clang toolchains and automated AnyKernel3 packaging.
+A GitHub Actions workflow template for building Android Generic Kernel Image (GKI) kernels (Linux 5.10 / 5.15 / 6.1) with AOSP Clang toolchains and automated AnyKernel3 packaging.
 
 ---
 
-## 🚀 Features
+## Features
 
 - **Automated Clang Toolchain Setup**: Pre-configured for AOSP Clang 17+ and ARM64 cross-compilation.
 - **ThinLTO Support**: Full support for Clang Link Time Optimization.
@@ -13,7 +13,7 @@ A production-ready GitHub Actions workflow template for building Android Generic
 
 ---
 
-## 📋 Usage
+## Usage
 
 Copy `.github/workflows/build-kernel.yml` to your target Android kernel repository:
 
@@ -38,5 +38,5 @@ jobs:
 
 ---
 
-## 📄 License
+## License
 MIT License
