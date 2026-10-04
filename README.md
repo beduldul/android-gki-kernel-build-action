@@ -1,3 +1,4 @@
+[![CI](https://github.com/beduldul/android-gki-kernel-build-action/actions/workflows/build-kernel.yml/badge.svg)](https://github.com/beduldul/android-gki-kernel-build-action/actions/workflows/build-kernel.yml)
 # Android GKI Kernel Build Action Template
 
 A GitHub Actions workflow template for building Android Generic Kernel Image (GKI) kernels (Linux 5.10 / 5.15 / 6.1) with AOSP Clang toolchains and automated AnyKernel3 packaging.
