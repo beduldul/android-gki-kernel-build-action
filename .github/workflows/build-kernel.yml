@@ -1,31 +1,153 @@
-name: Build GKI Kernel
+name: Build Marble Kernel 5.10.269 (BBR + CAKE + KSM + DAMON)
 
 on:
+  workflow_dispatch:
+    inputs:
+      localversion:
+        description: 'Kernel localversion (HARUS sama dengan vermagic vendor modules)'
+        required: true
+        default: '-gki-geff4b40407a1'
+      source_repo:
+        description: 'Kernel source repo'
+        required: true
+        default: 'https://github.com/Pzqqt/android_kernel_xiaomi_marble.git'
+      source_branch:
+        description: 'Branch'
+        required: true
+        default: 'melt-rebase'
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build:
     name: Build Kernel
     runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
     steps:
-      - name: Checkout Source Code
+      - name: Checkout workflow repo
         uses: actions/checkout@v4
 
-      - name: Setup Build Environment
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev bc git curl zip unzip clang llvm lld
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev libelf-dev libncurses-dev \
+            clang lld llvm git python3 cpio zip unzip rsync gawk curl xz-utils
+          echo "=== TOOLCHAIN ==="
+          clang --version | head -2
+          ld.lld --version
+          make --version | head -1
 
-      - name: Verify Build Setup
+      - name: Clone kernel source
         run: |
-          clang --version
-          make --version
-          echo "Build environment setup successfully completed!"
+          git clone --depth 1 -b "${{ github.event.inputs.source_branch }}" \
+            "${{ github.event.inputs.source_repo }}" kernel
+          cd kernel
+          echo "=== VERSION ==="
+          head -5 Makefile
+          echo "=== LOCALVERSION STOCK ==="
+          grep -n "CONFIG_LOCALVERSION" arch/arm64/configs/marble_defconfig
 
-      - name: Upload Build Artifact
+      - name: Patch defconfig (vermagic + fitur)
+        run: |
+          set -e
+          cd kernel
+          D=arch/arm64/configs/marble_defconfig
+          LV="${{ github.event.inputs.localversion }}"
+
+          # 1. Localversion EXACT supaya vermagic cocok dengan 390 vendor module
+          sed -i "s|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION=\"${LV}\"|" "$D"
+          grep -q "^CONFIG_LOCALVERSION=" "$D" || echo "CONFIG_LOCALVERSION=\"${LV}\"" >> "$D"
+
+          # 2. Matikan AUTO supaya tidak ada suffix -g<hash> / -dirty
+          sed -i '/^CONFIG_LOCALVERSION_AUTO=/d' "$D"
+          sed -i '/^# CONFIG_LOCALVERSION_AUTO is not set/d' "$D"
+          echo "# CONFIG_LOCALVERSION_AUTO is not set" >> "$D"
+
+          # helper: set config (hapus duplikat dulu, append di akhir = menang)
+          setcfg() {
+            key="$1"; val="$2"
+            sed -i "\|^${key}=|d" "$D" 2>/dev/null || true
+            sed -i "\|^# ${key} is not set|d" "$D" 2>/dev/null || true
+            printf '%s=%s\n' "$key" "$val" >> "$D"
+          }
+
+          # 3. NETWORK - BBR + fq + CAKE
+          setcfg CONFIG_TCP_CONG_ADVANCED y
+          setcfg CONFIG_TCP_CONG_BBR y
+          setcfg CONFIG_TCP_CONG_CUBIC y
+          setcfg CONFIG_NET_SCH_FQ y
+          setcfg CONFIG_NET_SCH_FQ_CODEL y
+          setcfg CONFIG_NET_SCH_CAKE y
+          setcfg CONFIG_NET_CLS_ACT y
+          setcfg CONFIG_NET_SCH_INGRESS y
+
+          # 4. MEMORY - KSM + DAMON
+          setcfg CONFIG_KSM y
+          setcfg CONFIG_DAMON y
+          setcfg CONFIG_DAMON_VADDR y
+          setcfg CONFIG_DAMON_PADDR y
+          setcfg CONFIG_DAMON_RECLAIM y
+
+          # 5. CFI toleran (clang distro != clang 22 vendor)
+          setcfg CONFIG_CFI_PERMISSIVE y
+
+          echo "=== HASIL PATCH ==="
+          grep -E "CONFIG_(LOCALVERSION|TCP_CONG_(ADVANCED|BBR|CUBIC)|NET_SCH_(FQ|FQ_CODEL|CAKE)|KSM|DAMON|CFI_PERMISSIVE)" "$D"
+
+      - name: Configure kernel
+        run: |
+          set -e
+          cd kernel
+          export ARCH=arm64 SUBARCH=arm64
+          make -j"$(nproc --all)" CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 marble_defconfig
+          echo "=== .config HASIL ==="
+          grep -E "^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|TCP_CONG_(ADVANCED|BBR)|NET_SCH_CAKE|KSM|DAMON_VADDR|CFI_PERMISSIVE)" .config || true
+
+      - name: Compile kernel
+        run: |
+          set -e
+          cd kernel
+          export ARCH=arm64 SUBARCH=arm64
+          make -j"$(nproc --all)" CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 Image Image.gz
+          echo "=== HASIL BUILD ==="
+          ls -la arch/arm64/boot/Image arch/arm64/boot/Image.gz
+
+      - name: Verify vermagic & config in Image
+        run: |
+          set -e
+          cd kernel
+          echo "=== LINUX VERSION STRING ==="
+          strings arch/arm64/boot/Image | grep -m3 "Linux version" || true
+          echo ""
+          echo "=== VERMAGIC (target: 5.10.269-gki-geff4b40407a1 SMP preempt mod_unload modversions aarch64) ==="
+          strings arch/arm64/boot/Image | grep -m3 "vermagic=" || true
+          echo ""
+          echo "=== IKCONFIG CHECK ==="
+          if [ -f scripts/extract-ikconfig ]; then
+            bash scripts/extract-ikconfig arch/arm64/boot/Image 2>/dev/null | grep -E "CONFIG_(TCP_CONG_BBR|NET_SCH_CAKE|KSM|DAMON_VADDR|LOCALVERSION)" || true
+          fi
+
+      - name: Package AnyKernel3
+        run: |
+          set -e
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git ak3
+          cd ak3
+          rm -rf .git .github
+          cp ../kernel/arch/arm64/boot/Image ./Image
+          cp ../kernel/arch/arm64/boot/Image.gz ./Image.gz
+          cp ../anykernel.sh ./anykernel.sh
+          chmod 755 anykernel.sh
+          test -f tools/ak3-core.sh || { echo "ak3-core.sh HILANG"; exit 1; }
+          zip -r9 "../marble-kernel-269.zip" . -x "*.git*" -x "*.DS_Store"
+          cd ..
+          ls -la marble-kernel-269.zip
+          unzip -l marble-kernel-269.zip | head -15
+
+      - name: Upload flashable zip
         uses: actions/upload-artifact@v4
         with:
-          name: Build-Manifest
-          path: README.md
+          name: marble-kernel-269-AnyKernel3
+          path: marble-kernel-269.zip
+          retention-days: 30
