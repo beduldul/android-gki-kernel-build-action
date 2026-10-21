@@ -24,7 +24,12 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
-      LOCALVERSION: ${{ github.event.inputs.localversion || '-gki-geff4b40407a1' }}
+      # PENTING: JANGAN pakai nama "LOCALVERSION" — kernel Makefile mengimpor
+      # variabel env LOCALVERSION dan scripts/setlocalversion menambahkan
+      # KEDUANYA: res="${res}${CONFIG_LOCALVERSION}${LOCALVERSION}"
+      # -> vermagic jadi dobel (5.10.269-gki-...-gki-...) dan 390 vendor
+      # module menolak load (Wi-Fi/touchscreen mati).
+      KERNEL_LV: ${{ github.event.inputs.localversion || '-gki-geff4b40407a1' }}
       SOURCE_REPO: ${{ github.event.inputs.source_repo || 'https://github.com/Pzqqt/android_kernel_xiaomi_marble.git' }}
       SOURCE_BRANCH: ${{ github.event.inputs.source_branch || 'melt-rebase' }}
 
@@ -58,7 +63,7 @@ jobs:
           set -e
           cd kernel
           D=arch/arm64/configs/marble_defconfig
-          LV="${LOCALVERSION}"
+          LV="${KERNEL_LV}"
 
           # 1. Localversion EXACT supaya vermagic cocok dengan 390 vendor module
           sed -i "s|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION=\"${LV}\"|" "$D"
@@ -105,15 +110,20 @@ jobs:
           set -e
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
+          # pastikan tidak ada LOCALVERSION bocor dari environment
+          unset LOCALVERSION
           make -j"$(nproc --all)" CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 marble_defconfig
           echo "=== .config HASIL ==="
           grep -E "^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|TCP_CONG_(ADVANCED|BBR)|NET_SCH_CAKE|KSM|DAMON_VADDR|CFI_PERMISSIVE)" .config || true
+          echo "=== UTS_RELEASE (target: 5.10.269-gki-geff4b40407a1) ==="
+          make -s CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 kernelrelease 2>/dev/null || true
 
       - name: Compile kernel
         run: |
           set -e
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
+          unset LOCALVERSION
           make -j"$(nproc --all)" CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 Image Image.gz
           echo "=== HASIL BUILD ==="
           ls -la arch/arm64/boot/Image arch/arm64/boot/Image.gz
@@ -125,8 +135,27 @@ jobs:
           echo "=== LINUX VERSION STRING ==="
           strings arch/arm64/boot/Image | grep -m3 "Linux version" || true
           echo ""
-          echo "=== VERMAGIC (target: 5.10.269-gki-geff4b40407a1 SMP preempt mod_unload modversions aarch64) ==="
-          strings arch/arm64/boot/Image | grep -m3 "vermagic=" || true
+          echo "=== VERMAGIC ==="
+          VM=$(strings arch/arm64/boot/Image | grep -m1 "vermagic=" || true)
+          echo "$VM"
+          echo ""
+          TARGET="5.10.269-gki-geff4b40407a1"
+          echo "TARGET: $TARGET"
+          # GATE: build GAGAL kalau vermagic tidak exact
+          if ! strings arch/arm64/boot/Image | grep -qF "${TARGET} SMP preempt mod_unload modversions aarch64"; then
+            echo "########## GAGAL: vermagic tidak cocok ##########"
+            echo "Yang ketemu: $VM"
+            echo "Harus:      ${TARGET} SMP preempt mod_unload modversions aarch64"
+            echo "Kalau dobel (-gki-...-gki-...), cek env LOCALVERSION / file localversion*."
+            exit 1
+          fi
+          echo "OK: vermagic EXACT"
+          # pastikan TIDAK dobel
+          if strings arch/arm64/boot/Image | grep -qF "${TARGET}${TARGET}"; then
+            echo "########## GAGAL: vermagic DOBEL ##########"
+            exit 1
+          fi
+          echo "OK: vermagic tidak dobel"
           echo ""
           echo "=== IKCONFIG CHECK ==="
           if [ -f scripts/extract-ikconfig ]; then
