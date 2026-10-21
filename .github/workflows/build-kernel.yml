@@ -105,6 +105,13 @@ jobs:
           echo "=== HASIL PATCH ==="
           grep -E "CONFIG_(LOCALVERSION|TCP_CONG_(ADVANCED|BBR|CUBIC)|NET_SCH_(FQ|FQ_CODEL|CAKE)|KSM|DAMON|CFI_PERMISSIVE)" "$D"
 
+          # 6. BUANG .git — scripts/setlocalversion menambahkan '+' kalau git tree
+          #    kotor, dan defconfig baru saja kita patch -> tree kotor -> vermagic
+          #    jadi '5.10.269-gki-geff4b40407a1+' -> 390 vendor module menolak load.
+          #    Tanpa .git, cek dirty & scm_version dilewati, vermagic jadi EXACT.
+          rm -rf .git
+          echo "=== .git dihapus (cegah suffix '+' di vermagic) ==="
+
       - name: Configure kernel
         run: |
           set -e
@@ -116,7 +123,18 @@ jobs:
           echo "=== .config HASIL ==="
           grep -E "^CONFIG_(LOCALVERSION|LOCALVERSION_AUTO|TCP_CONG_(ADVANCED|BBR)|NET_SCH_CAKE|KSM|DAMON_VADDR|CFI_PERMISSIVE)" .config || true
           echo "=== UTS_RELEASE (target: 5.10.269-gki-geff4b40407a1) ==="
-          make -s CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 kernelrelease 2>/dev/null || true
+          KR=$(make -s CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 kernelrelease 2>/dev/null || true)
+          echo "kernelrelease=$KR"
+          # GATE DINI: gagal SEBELUM compile 22 menit kalau masih ada '+' atau dobel
+          if [ "$KR" != "5.10.269-gki-geff4b40407a1" ]; then
+            echo "########## GAGAL: kernelrelease '$KR' != '5.10.269-gki-geff4b40407a1' ##########"
+            case "$KR" in
+              *+)     echo "SEBAB: ada suffix '+' -> git tree kotor (setlocalversion). Pastikan .git dihapus." ;;
+              *-gki-*gki-*) echo "SEBAB: localversion dobel -> env LOCALVERSION bocor." ;;
+            esac
+            exit 1
+          fi
+          echo "OK: kernelrelease EXACT (sebelum compile)"
 
       - name: Compile kernel
         run: |
