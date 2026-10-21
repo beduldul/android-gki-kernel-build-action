@@ -23,6 +23,10 @@ jobs:
     name: Build Kernel
     runs-on: ubuntu-22.04
     timeout-minutes: 240
+    env:
+      LOCALVERSION: ${{ github.event.inputs.localversion || '-gki-geff4b40407a1' }}
+      SOURCE_REPO: ${{ github.event.inputs.source_repo || 'https://github.com/Pzqqt/android_kernel_xiaomi_marble.git' }}
+      SOURCE_BRANCH: ${{ github.event.inputs.source_branch || 'melt-rebase' }}
 
     steps:
       - name: Checkout workflow repo
@@ -41,8 +45,8 @@ jobs:
 
       - name: Clone kernel source
         run: |
-          git clone --depth 1 -b "${{ github.event.inputs.source_branch }}" \
-            "${{ github.event.inputs.source_repo }}" kernel
+          git clone --depth 1 -b "${SOURCE_BRANCH}" \
+            "${SOURCE_REPO}" kernel
           cd kernel
           echo "=== VERSION ==="
           head -5 Makefile
@@ -54,7 +58,7 @@ jobs:
           set -e
           cd kernel
           D=arch/arm64/configs/marble_defconfig
-          LV="${{ github.event.inputs.localversion }}"
+          LV="${LOCALVERSION}"
 
           # 1. Localversion EXACT supaya vermagic cocok dengan 390 vendor module
           sed -i "s|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION=\"${LV}\"|" "$D"
