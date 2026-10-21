@@ -105,12 +105,18 @@ jobs:
           echo "=== HASIL PATCH ==="
           grep -E "CONFIG_(LOCALVERSION|TCP_CONG_(ADVANCED|BBR|CUBIC)|NET_SCH_(FQ|FQ_CODEL|CAKE)|KSM|DAMON|CFI_PERMISSIVE)" "$D"
 
-          # 6. BUANG .git — scripts/setlocalversion menambahkan '+' kalau git tree
-          #    kotor, dan defconfig baru saja kita patch -> tree kotor -> vermagic
-          #    jadi '5.10.269-gki-geff4b40407a1+' -> 390 vendor module menolak load.
-          #    Tanpa .git, cek dirty & scm_version dilewati, vermagic jadi EXACT.
-          rm -rf .git
-          echo "=== .git dihapus (cegah suffix '+' di vermagic) ==="
+          # 6. PIN lokalisasi versi pakai .scmversion KOSONG.
+          #    scripts/setlocalversion:
+          #      - source include/config/auto.conf -> CONFIG_LOCALVERSION benar
+          #      - CONFIG_LOCALVERSION_AUTO tidak diset -> panggil scm_version --short
+          #      - scm_version: `git describe --exact-match` GAGAL karena clone
+          #        --depth 1 tidak punya tag -> `if $short; then echo "+"`
+          #      => vermagic jadi '5.10.269-gki-geff4b40407a1+'
+          #    scm_version() mengecek `-e .scmversion` PALING AWAL dan langsung
+          #    `cat` isinya lalu return. File kosong = suffix kosong = EXACT.
+          #    (Cara resmi kernel; jangan hapus .git, itu justru bikin fallback '+'.)
+          : > .scmversion
+          echo "=== .scmversion dibuat kosong (pin vermagic) ==="
 
       - name: Configure kernel
         run: |
